@@ -1,6 +1,6 @@
 # Azure-Powered Podcast Generator
 
-![image](https://github.com/user-attachments/assets/55a27c13-2a9b-40aa-bd4b-12a22745d993)
+![image](Diagram.png)
 
 Listen to an example [HERE](https://microsofteur-my.sharepoint.com/:u:/g/personal/naghazal_microsoft_com/EWDoyr23Y35JtwAIAnCRlTQBFggVlBLKgdcKvRqHJPDH9w?e=dVabys)
 
