@@ -2,7 +2,7 @@
 
 ![image](Diagram.png)
 
-Listen to an example [HERE](https://microsofteur-my.sharepoint.com/:u:/g/personal/naghazal_microsoft_com/EWDoyr23Y35JtwAIAnCRlTQBFggVlBLKgdcKvRqHJPDH9w?e=dVabys)
+Listen to an example <a href="https://microsofteur-my.sharepoint.com/:u:/g/personal/naghazal_microsoft_com/EWDoyr23Y35JtwAIAnCRlTQBFggVlBLKgdcKvRqHJPDH9w?e=dVabys" target="_blank">HERE</a>
 
 An end-to-end solution for converting document content into professional podcast episodes using Azure AI services. Automates script generation, emotional speech synthesis, and audio production.
 
