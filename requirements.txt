@@ -1,0 +1,11 @@
+streamlit
+openai
+azure-cognitiveservices-speech
+azure-ai-formrecognizer
+azure-core
+python-dotenv
+docx2txt
+PyPDF2
+beautifulsoup4
+pydub
+lxml
