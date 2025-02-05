@@ -56,7 +56,7 @@ DOCUMENT_INTELLIGENCE_ENDPOINT=your_endpoint
 
 1. Start the Streamlit app:
 ```bash
-streamlit run app.py
+streamlit run podcast.py
 ```
 
 2. In the web interface:
