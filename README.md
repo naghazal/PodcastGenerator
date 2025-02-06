@@ -68,6 +68,7 @@ streamlit run podcast.py
    - Place `intro.wav` in project root for podcast intro
 
 ## Steps to install FFmpeg system wide
+Ref: [https://www.youtube.com/watch?v=4jx2_j5Seew]
 **1. Download FFmpeg:**
 - isit the official FFmpeg website: [https://ffmpeg.org/download.html](https://ffmpeg.org/download.html)- lick on the Windows logo under "Get packages & executable files."- hoose a build from a trusted source, such as [https://www.gyan.dev/ffmpeg/builds/](https://www.gyan.dev/ffmpeg/builds/).- ownload the latest **release full** build.
 **2. Extract the Downloaded Archive:**
