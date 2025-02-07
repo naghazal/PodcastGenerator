@@ -348,6 +348,8 @@ def synthesize_ssml_to_audio(ssml, output_file, max_retries=3):
                         logger.warning(f"Chunk {i} synthesis failed (attempt {retries}/{max_retries})")
                         if result.cancellation_details:
                             logger.error(f"Error details: {result.cancellation_details.reason}")
+                        else:
+                            logger.error(f"No error details provided for chunk {i}")
                 except Exception as e:
                     retries += 1
                     logger.error(f"Error processing chunk {i} (attempt {retries}/{max_retries}): {e}")
@@ -359,16 +361,45 @@ def synthesize_ssml_to_audio(ssml, output_file, max_retries=3):
         # Second pass: Retry failed chunks with smaller sizes
         if failed_chunks:
             logger.info(f"Attempting to process {len(failed_chunks)} failed chunks with smaller sizes")
+            
+            # Sort failed chunks by size (largest first)
+            failed_chunks.sort(key=lambda x: len(x[1]), reverse=True)
+            
             for chunk_id, chunk in failed_chunks:
-                sub_chunks = [chunk[i:i+1000] for i in range(0, len(chunk), 1000)]
-                for sub_i, sub_chunk in enumerate(sub_chunks, 1):
-                    try:
-                        result = synthesizer.speak_ssml_async(sub_chunk).get()
-                        if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
-                            wav_data_list.append((chunk_id, result.audio_data))
-                            logger.info(f"Successfully synthesized sub-chunk {sub_i} of failed chunk {chunk_id}")
-                    except Exception as e:
-                        logger.error(f"Error processing sub-chunk {sub_i} of chunk {chunk_id}: {e}")
+                logger.info(f"Retrying failed chunk {chunk_id} (size: {len(chunk)} bytes)")
+                
+                # Split into increasingly smaller sub-chunks
+                sub_chunk_sizes = [500, 250, 100]  # Define sub-chunk sizes
+                
+                for sub_chunk_size in sub_chunk_sizes:
+                    logger.info(f"Attempting sub-chunk size: {sub_chunk_size} bytes")
+                    sub_chunks = [chunk[i:i+sub_chunk_size] for i in range(0, len(chunk), sub_chunk_size)]
+                    
+                    for sub_i, sub_chunk in enumerate(sub_chunks, 1):
+                        if not sub_chunk.strip():
+                            logger.warning(f"Skipping empty sub-chunk {sub_i} of chunk {chunk_id}")
+                            continue
+                            
+                        retries = 0
+                        success = False
+                        
+                        while not success and retries < max_retries:
+                            try:
+                                result = synthesizer.speak_ssml_async(sub_chunk).get()
+                                if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
+                                    wav_data_list.append((chunk_id + (sub_i / 1000.0), result.audio_data))  # Unique ID
+                                    success = True
+                                    logger.info(f"Successfully synthesized sub-chunk {sub_i} of failed chunk {chunk_id}")
+                                else:
+                                    retries += 1
+                                    logger.warning(f"Sub-chunk {sub_i} of chunk {chunk_id} synthesis failed (attempt {retries}/{max_retries})")
+                                    if result.cancellation_details:
+                                        logger.error(f"Error details: {result.cancellation_details.reason}")
+                                    else:
+                                        logger.error(f"No error details provided for sub-chunk {sub_i} of chunk {chunk_id}")
+                            except Exception as e:
+                                retries += 1
+                                logger.error(f"Error processing sub-chunk {sub_i} of chunk {chunk_id}: {e}")
         
         # Sort and combine audio data in correct order
         if wav_data_list:
