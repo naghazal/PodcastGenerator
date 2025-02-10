@@ -118,18 +118,24 @@ def generate_podcast_script(content):
         return None
 
 def sanitize_ssml(ssml):
-    """Parse and sanitize SSML to remove stray text nodes."""
+    """Parse and sanitize SSML to remove stray text nodes and guarantee no nested <voice> tags."""
     try:
         soup = BeautifulSoup(ssml, 'xml')
         speak = soup.find('speak')
         if speak:
-            # Iterate over a copy of children to remove stray text nodes (only whitespace allowed)
+            # Remove stray text nodes.
             for child in list(speak.contents):
                 if child.name is None and not str(child).strip():
                     child.extract()
                 elif child.name is None:
-                    # Remove non-whitespace text nodes.
                     child.extract()
+            # Ensure no <voice> tag is nested within another <voice> tag.
+            while True:
+                nested_voice = soup.find(lambda tag: tag.name=='voice' and tag.parent and tag.parent.name=='voice')
+                if not nested_voice:
+                    break
+                # Replace nested voice with its inner text.
+                nested_voice.replace_with(nested_voice.get_text())
             return str(soup)
         return ssml
     except Exception as e:
@@ -433,13 +439,11 @@ def main():
             return
         st.write("SSML Content:\n", ssml)
         
-        # Pre-synthesis validation and saving SSML for debugging.
+        # Pre-synthesis validation for debugging.
         if not validate_voice_tags(ssml):
             st.error("Generated SSML failed validation. Please check the logs.")
             logger.error(f"Invalid SSML content:\n{ssml}")
             return
-        with open("c:/Users/ihebg/OneDrive/Desktop/podcast/last_generated.ssml", "w") as f:
-            f.write(ssml)
 
         # Step 4: Synthesize the SSML to audio
         st.write("Synthesizing SSML to audio...")
