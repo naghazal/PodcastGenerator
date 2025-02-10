@@ -117,160 +117,159 @@ def generate_podcast_script(content):
         logger.error(f"Error generating podcast script: {e}")
         return None
 
+def sanitize_ssml(ssml):
+    """Parse and sanitize SSML to remove stray text nodes."""
+    try:
+        soup = BeautifulSoup(ssml, 'xml')
+        speak = soup.find('speak')
+        if speak:
+            # Iterate over a copy of children to remove stray text nodes (only whitespace allowed)
+            for child in list(speak.contents):
+                if child.name is None and not str(child).strip():
+                    child.extract()
+                elif child.name is None:
+                    # Remove non-whitespace text nodes.
+                    child.extract()
+            return str(soup)
+        return ssml
+    except Exception as e:
+        logger.error(f"Error sanitizing SSML: {e}")
+        return ssml
+
 def generate_ssml_from_script(script):
     try:
         logger.info("Generating SSML from podcast script using Azure OpenAI...")
+        # Updated system prompt: fixed voice names and added mark support for interruptions.
+        system_prompt = """Take a deep breath,You are an SSML Expert specializing in taking podcast scripts and turning them into appropriate ssml format and microscopically subtle speech variations.
+        
+Rules for creating ultra-natural voice expressions:
+1. Voice Selection:
+   - Speaker 1: <voice name="en-US-AvaMultilingualNeural"> <!-- Most natural female voice -->
+   - Speaker 2: <voice name="en-US-AndrewMultilingualNeural"> <!-- Most natural male voice -->
+   
+2. Micro-Subtle Emotion Mapping:
+   [excited]:
+     <mstts:express-as style="chat" styledegree="1.05">
+       <prosody rate="2%" pitch="2%">text</prosody>
+     </mstts:express-as>
+   ... (other mappings)
+3. Mark Support for Interruptions:
+   Example:
+   <voice name="en-US-AvaMultilingualNeural">
+     <prosody rate="2%">I think that--<mark name="interrupt"/></prosody>
+   </voice>
+   <break time="5ms"/>
+   <voice name="en-US-AndrewMultilingualNeural">
+     <prosody rate="10%">Exactly!</prosody>
+   </voice>"""
+        
         response = azure_openai_client.chat.completions.create(
             model=model,
             messages=[
-                {
-                    "role": "system",
-                    "content": """You are an SSML Expert specializing in microscopically subtle speech variations.
-                    
-                    Rules for creating ultra-natural voice expressions:
-                    1. Voice Selection:
-                       - Speaker 1: <voice name="en-US-AvaMultilingualNeural"> <!-- Most natural female voice -->
-                       - Speaker 2: <voice name=" en-US-AndrewMultilingualNeural"> <!-- Most natural male voice -->
-                    
-                    2. Micro-Subtle Emotion Mapping:
-                       [excited]: 
-                         <mstts:express-as style="chat" styledegree="1.05">
-                           <prosody rate="2%" pitch="2%">text</prosody>
-                         </mstts:express-as>
-                       
-                       [thoughtful]:
-                         <mstts:express-as style="gentle" styledegree="0.95">
-                           <prosody rate="-1%" pitch="-1%">text</prosody>
-                         </mstts:express-as>
-                       
-                       [curious]:
-                         <mstts:express-as style="chat" styledegree="0.98">
-                           <prosody pitch="1%">text</prosody>
-                         </mstts:express-as>
-                       
-                       [serious]:
-                         <mstts:express-as style="newscast-casual" styledegree="0.97">
-                           <prosody pitch="-1%">text</prosody>
-                         </mstts:express-as>
-                       
-                       [happy]:
-                         <mstts:express-as style="friendly" styledegree="1.02">
-                           <prosody pitch="1.5%">text</prosody>
-                         </mstts:express-as>
-                       
-                       [interrupting]:
-                         <break time="5ms"/>
-                         <prosody rate="10%" contour="(0%,+5%) (10%,0%)">text</prosody>
-
-                    3. Ultra-Natural Guidelines:
-                       - Zero delay for interruptions
-                       - Micro-pauses: <break time="30ms"/>
-                       - Use <mark name="interrupt"/> at cut-off points
-                       
-                    4. Example of instant interruption:
-                       <voice name="en-US-AvaMultilingualNeural">
-                         I think that the main--<mark name="interrupt"/>
-                       </voice>
-                       <break time="5ms"/>
-                       <voice name="en-US-AndrewMultilingualNeural">
-                         <prosody rate="10%">Yes, exactly!</prosody>
-                       </voice>"""
-                },
-                {
-                    "role": "user",
-                    "content": f"Convert this script to ultra-natural SSML with barely perceptible emotional shifts:\n{script}"
-                }
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"Convert this script to ultra-natural SSML with barely perceptible emotional shifts:\n{script}"}
             ],
             max_tokens=4000,
-            temperature=0.2  # Lower temperature for more consistent subtle changes
+            temperature=0.2
         )
         
         raw_ssml = response.choices[0].message.content.strip()
-        
-        # Add required XML namespaces
         if not raw_ssml.startswith('<?xml'):
             raw_ssml = ('<?xml version="1.0" encoding="UTF-8"?>\n'
-                       '<speak version="1.0" '
-                       'xmlns="http://www.w3.org/2001/10/synthesis" '
-                       'xmlns:mstts="http://www.w3.org/2001/mstts" '
-                       'xml:lang="en-US">\n' + raw_ssml)
-
+                        '<speak version="1.0" '
+                        'xmlns="http://www.w3.org/2001/10/synthesis" '
+                        'xmlns:mstts="http://www.w3.org/2001/mstts" '
+                        'xml:lang="en-US">\n' + raw_ssml)
         if not raw_ssml.endswith('</speak>'):
             raw_ssml += '\n</speak>'
-
-        return raw_ssml
-
+        # Sanitize SSML to remove stray text nodes.
+        cleaned_ssml = sanitize_ssml(raw_ssml)
+        return cleaned_ssml
     except Exception as e:
         logger.error(f"Error generating SSML: {e}")
         return None
 
 def validate_voice_tags(ssml):
-    """Ensure all voice tags are properly paired and no content is lost."""
-    soup = BeautifulSoup(ssml, 'xml')
-    voices = soup.find_all('voice')
-    
-    # Check for unclosed or malformed tags
-    for voice in voices:
-        if not voice.string and not voice.contents:
-            logger.error(f"Empty voice tag found: {voice}")
+    """Validate SSML structure and Azure-supported features"""
+    try:
+        soup = BeautifulSoup(ssml, 'xml')
+        if not soup.find('speak'):
+            logger.error("Missing speak tag")
             return False
-    return True
+        valid_voices = {"en-US-AvaMultilingualNeural", "en-US-AndrewMultilingualNeural"}
+        for voice in soup.find_all('voice'):
+            if 'name' not in voice.attrs or voice['name'] not in valid_voices:
+                logger.error(f"Invalid voice: {voice.get('name', '')}")
+                return False
+        # Updated valid styles to include additional supported styles.
+        valid_styles = {
+            "chat", "gentle", "newscast-casual", "friendly",
+            "calm", "curious", "agreeable", "serious",
+            "emphatic", "pondering", "passionate", "smiling", "concluding"
+        }
+        for express in soup.find_all('mstts:express-as'):
+            if 'style' not in express.attrs or express['style'] not in valid_styles:
+                logger.error(f"Unsupported style: {express.get('style', '')}")
+                return False
+        return True
+    except Exception as e:
+        logger.error(f"SSML validation failed: {e}")
+        return False
+
+def split_large_voice(voice, max_chunk_size):
+    """Split a single voice element if its string length exceeds max_chunk_size."""
+    # Build the opening tag with attributes.
+    attrs = " ".join(f'{key}="{value}"' for key, value in voice.attrs.items())
+    opening_tag = f"<voice {attrs}>" if attrs else "<voice>"
+    closing_tag = "</voice>"
+    overhead = len(opening_tag) + len(closing_tag)
+    # Get the inner text.
+    text = voice.get_text() or ""
+    # Calculate available size for text.
+    available_size = max_chunk_size - overhead
+    parts = []
+    for i in range(0, len(text), available_size):
+        part_text = text[i:i+available_size]
+        parts.append(f"{opening_tag}{part_text}{closing_tag}")
+    return parts
 
 def split_ssml_into_chunks(ssml, max_chunk_size=2000):
-    """Split SSML into smaller chunks while preserving complete sentences and voice tags."""
+    """Split SSML by grouping complete <voice> elements using BeautifulSoup."""
     try:
-        # Clean up any duplicate XML declarations or speak tags
-        ssml = re.sub(r'<\?xml[^>]*\?>\s*', '', ssml)
-        ssml = re.sub(r'<speak[^>]*>\s*', '', ssml)
-        ssml = re.sub(r'</speak>\s*', '', ssml)
-        
-        # Parse the SSML content
-        soup = BeautifulSoup(f"<root>{ssml}</root>", 'xml')
+        soup = BeautifulSoup(ssml, 'xml')
         voices = soup.find_all('voice')
-        
-        # Group voices into pairs (keep conversation exchanges together)
-        pairs = []
-        for i in range(0, len(voices), 2):
-            if i + 1 < len(voices):
-                pairs.append([voices[i], voices[i + 1]])
-            else:
-                pairs.append([voices[i]])
-        
-        # Create chunks from pairs
         chunks = []
-        current_chunk = []
-        current_length = 0
-        
-        for pair in pairs:
-            pair_str = ''.join(str(v) for v in pair)
-            pair_length = len(pair_str)
-            
-            if current_length + pair_length > max_chunk_size and current_chunk:
-                chunk_ssml = create_ssml_chunk(current_chunk)
-                if validate_voice_tags(chunk_ssml):
-                    chunks.append(chunk_ssml)
-                current_chunk = []
-                current_length = 0
-            
-            current_chunk.extend(pair)
-            current_length += pair_length
-        
-        # Add remaining voices
-        if current_chunk:
-            chunk_ssml = create_ssml_chunk(current_chunk)
-            if validate_voice_tags(chunk_ssml):
-                chunks.append(chunk_ssml)
-        
-        # Validate all chunks have content
-        total_voices = sum(len(BeautifulSoup(chunk, 'xml').find_all('voice')) for chunk in chunks)
-        if total_voices != len(voices):
-            logger.error(f"Voice count mismatch: {total_voices} vs {len(voices)}")
-            return [ssml]  # Return single chunk if validation fails
-            
+        current_content = ""
+        for voice in voices:
+            voice_str = str(voice)
+            if len(current_content) + len(voice_str) > max_chunk_size and current_content:
+                chunk = (
+                    '<?xml version="1.0" encoding="UTF-8"?>\n'
+                    '<speak version="1.0" '
+                    'xmlns="http://www.w3.org/2001/10/synthesis" '
+                    'xmlns:mstts="http://www.w3.org/2001/mstts" '
+                    'xml:lang="en-US">\n' +
+                    current_content +
+                    '\n</speak>'
+                )
+                chunks.append(chunk)
+                current_content = voice_str
+            else:
+                current_content += voice_str
+        if current_content:
+            chunk = (
+                '<?xml version="1.0" encoding="UTF-8"?>\n'
+                '<speak version="1.0" '
+                'xmlns="http://www.w3.org/2001/10/synthesis" '
+                'xmlns:mstts="http://www.w3.org/2001/mstts" '
+                'xml:lang="en-US">\n' +
+                current_content +
+                '\n</speak>'
+            )
+            chunks.append(chunk)
         return chunks
-
     except Exception as e:
-        logger.error(f"Error splitting SSML: {e}")
+        logger.error(f"Improved chunking failed: {e}")
         return [ssml]
 
 def create_ssml_chunk(voices):
@@ -302,118 +301,68 @@ def combine_wav_files(wav_data_list):
         return None
 
 def synthesize_ssml_to_audio(ssml, output_file, max_retries=3):
-    """Use Azure Speech Service to synthesize the SSML into an audio file."""
+    """Use Azure Speech Service to synthesize the SSML into an audio file with improved retry logic"""
     try:
         logger.info("Synthesizing SSML to audio...")
-        
-        # Validate complete SSML before processing
         if not validate_voice_tags(ssml):
             logger.error("Invalid SSML detected")
             return None
-            
-        # Configure speech synthesizer
+        
         speech_config.set_property(speechsdk.PropertyId.SpeechServiceConnection_InitialSilenceTimeoutMs, "30000")
         speech_config.set_property(speechsdk.PropertyId.Speech_SegmentationSilenceTimeoutMs, "200")
         speech_config.set_speech_synthesis_output_format(speechsdk.SpeechSynthesisOutputFormat.Riff16Khz16BitMonoPcm)
         
-        audio_config = speechsdk.audio.AudioOutputConfig(filename=output_file)
-        synthesizer = speechsdk.SpeechSynthesizer(
-            speech_config=speech_config, 
-            audio_config=audio_config
-        )
-        
-        # Split SSML into smaller chunks
-        ssml_chunks = split_ssml_into_chunks(ssml, max_chunk_size=2000)  # Reduced chunk size
+        # Use a smaller chunk size.
+        ssml_chunks = split_ssml_into_chunks(ssml, max_chunk_size=1500)
         logger.info(f"Split SSML into {len(ssml_chunks)} chunks")
         wav_data_list = []
-        failed_chunks = []
+
+        import time  # Ensure time module is available.
+        # Create a fresh synthesizer for each attempt.
+        def create_synthesizer():
+            return speechsdk.SpeechSynthesizer(
+                speech_config=speech_config,
+                audio_config=speechsdk.audio.AudioOutputConfig(use_default_speaker=True)
+            )
         
-        # First pass: Process all chunks
         for i, chunk in enumerate(ssml_chunks, 1):
-            chunk_size = len(chunk)
-            logger.info(f"Processing chunk {i}/{len(ssml_chunks)} (size: {chunk_size} bytes)")
-            
+            chunk = chunk.strip()
+            if not chunk:
+                continue
+            logger.info(f"Processing chunk {i} (size: {len(chunk)})")
             success = False
-            retries = 0
-            
-            while not success and retries < max_retries:
+            retry_count = 0
+            while not success and retry_count < max_retries:
                 try:
+                    synthesizer = create_synthesizer()
                     result = synthesizer.speak_ssml_async(chunk).get()
                     if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
-                        wav_data_list.append((i, result.audio_data))
+                        wav_data_list.append(result.audio_data)
                         success = True
-                        logger.info(f"Successfully synthesized chunk {i}")
+                        logger.info(f"Chunk {i} synthesized successfully")
                     else:
-                        retries += 1
-                        logger.warning(f"Chunk {i} synthesis failed (attempt {retries}/{max_retries})")
+                        logger.warning(f"Chunk {i} failed (attempt {retry_count+1})")
                         if result.cancellation_details:
-                            logger.error(f"Error details: {result.cancellation_details.reason}")
-                        else:
-                            logger.error(f"No error details provided for chunk {i}")
+                            logger.error(f"Error: {result.cancellation_details.reason}")
+                            logger.error(f"Error details: {result.cancellation_details.error_details}")
+                        retry_count += 1
+                        time.sleep(2 ** retry_count)  # Exponential backoff.
                 except Exception as e:
-                    retries += 1
-                    logger.error(f"Error processing chunk {i} (attempt {retries}/{max_retries}): {e}")
-                
+                    logger.error(f"Chunk {i} exception: {str(e)}")
+                    retry_count += 1
+                    time.sleep(2 ** retry_count)
             if not success:
-                failed_chunks.append((i, chunk))
-                logger.error(f"Failed to process chunk {i} after {max_retries} attempts")
+                logger.error(f"Failed chunk {i} content:\n{chunk[:500]}...")
+                return None
         
-        # Second pass: Retry failed chunks with smaller sizes
-        if failed_chunks:
-            logger.info(f"Attempting to process {len(failed_chunks)} failed chunks with smaller sizes")
-            
-            # Sort failed chunks by size (largest first)
-            failed_chunks.sort(key=lambda x: len(x[1]), reverse=True)
-            
-            for chunk_id, chunk in failed_chunks:
-                logger.info(f"Retrying failed chunk {chunk_id} (size: {len(chunk)} bytes)")
-                
-                # Split into increasingly smaller sub-chunks
-                sub_chunk_sizes = [500, 250, 100]  # Define sub-chunk sizes
-                
-                for sub_chunk_size in sub_chunk_sizes:
-                    logger.info(f"Attempting sub-chunk size: {sub_chunk_size} bytes")
-                    sub_chunks = [chunk[i:i+sub_chunk_size] for i in range(0, len(chunk), sub_chunk_size)]
-                    
-                    for sub_i, sub_chunk in enumerate(sub_chunks, 1):
-                        if not sub_chunk.strip():
-                            logger.warning(f"Skipping empty sub-chunk {sub_i} of chunk {chunk_id}")
-                            continue
-                            
-                        retries = 0
-                        success = False
-                        
-                        while not success and retries < max_retries:
-                            try:
-                                result = synthesizer.speak_ssml_async(sub_chunk).get()
-                                if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
-                                    wav_data_list.append((chunk_id + (sub_i / 1000.0), result.audio_data))  # Unique ID
-                                    success = True
-                                    logger.info(f"Successfully synthesized sub-chunk {sub_i} of failed chunk {chunk_id}")
-                                else:
-                                    retries += 1
-                                    logger.warning(f"Sub-chunk {sub_i} of chunk {chunk_id} synthesis failed (attempt {retries}/{max_retries})")
-                                    if result.cancellation_details:
-                                        logger.error(f"Error details: {result.cancellation_details.reason}")
-                                    else:
-                                        logger.error(f"No error details provided for sub-chunk {sub_i} of chunk {chunk_id}")
-                            except Exception as e:
-                                retries += 1
-                                logger.error(f"Error processing sub-chunk {sub_i} of chunk {chunk_id}: {e}")
-        
-        # Sort and combine audio data in correct order
-        if wav_data_list:
-            wav_data_list.sort(key=lambda x: x[0])  # Sort by chunk index
-            combined_audio = combine_wav_files([data for _, data in wav_data_list])
-            if combined_audio:
-                with open(output_file, 'wb') as audio_file:
-                    audio_file.write(combined_audio)
-                logger.info(f"Audio saved to {output_file}")
-                return output_file
-        
+        combined_audio = combine_wav_files(wav_data_list)
+        if combined_audio:
+            with open(output_file, 'wb') as audio_file:
+                audio_file.write(combined_audio)
+            logger.info(f"Audio saved to {output_file}")
+            return output_file
         logger.error("No audio data generated")
         return None
-        
     except Exception as e:
         logger.error(f"Error synthesizing audio: {e}")
         return None
@@ -483,6 +432,14 @@ def main():
             st.error("Failed to generate SSML from script. Exiting.")
             return
         st.write("SSML Content:\n", ssml)
+        
+        # Pre-synthesis validation and saving SSML for debugging.
+        if not validate_voice_tags(ssml):
+            st.error("Generated SSML failed validation. Please check the logs.")
+            logger.error(f"Invalid SSML content:\n{ssml}")
+            return
+        with open("c:/Users/ihebg/OneDrive/Desktop/podcast/last_generated.ssml", "w") as f:
+            f.write(ssml)
 
         # Step 4: Synthesize the SSML to audio
         st.write("Synthesizing SSML to audio...")
