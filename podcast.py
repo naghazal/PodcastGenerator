@@ -13,6 +13,10 @@ import re
 import wave
 import io
 from pydub import AudioSegment
+import warnings
+warnings.filterwarnings("ignore")  # Suppress all warnings
+import logging
+logging.getLogger("azure").setLevel(logging.ERROR)  # Hide Azure internal logs
 
 # Load environment variables from .env file
 load_dotenv()
@@ -96,7 +100,7 @@ def generate_podcast_script(content):
                         "Speaker 2: [interrupting] Oh my gosh, yes! [enthusiastic] I was just about to say the same thing!\n\n"
                         f"Create a dynamic conversation about THE ENTIRETY OF THE CONTENT: {content}\n"
                         "Requirements:\n"
-                        "1. Use Speaker 1 (female) and Speaker 2 (male) for the dialogue, DON'T ever mention their names when a speaker is talking to the other in their dialogue and the first speaker must say hey there! welcome to the MTTs Podcast.\n"
+                        "1. Use Speaker 1 (female) and Speaker 2 (male) for the dialogue, DON'T ever mention their names when a speaker is talking to the other in their dialogue and the first speaker must say hey there! welcome to the iCSU Podcast.\n"
                         "2. Add emotional cues WITHIN sentences to show mood changes, e.g.:\n"
                         "   - Speaker 1: [excited] I started reading this book and [thoughtful] it really changed my perspective on--\n"
                         "   - Speaker 2: You know, [curious] I've been wondering about that [enthusiastic] especially when it comes to...\n"
@@ -307,7 +311,7 @@ def combine_wav_files(wav_data_list):
         return None
 
 def synthesize_ssml_to_audio(ssml, output_file, max_retries=3):
-    """Use Azure Speech Service to synthesize the SSML into an audio file with improved retry logic"""
+    """Use Azure Speech Service to synthesize SSML into an audio file without playback."""
     try:
         logger.info("Synthesizing SSML to audio...")
         if not validate_voice_tags(ssml):
@@ -318,18 +322,21 @@ def synthesize_ssml_to_audio(ssml, output_file, max_retries=3):
         speech_config.set_property(speechsdk.PropertyId.Speech_SegmentationSilenceTimeoutMs, "200")
         speech_config.set_speech_synthesis_output_format(speechsdk.SpeechSynthesisOutputFormat.Riff16Khz16BitMonoPcm)
         
-        # Use a smaller chunk size.
         ssml_chunks = split_ssml_into_chunks(ssml, max_chunk_size=1500)
         logger.info(f"Split SSML into {len(ssml_chunks)} chunks")
         wav_data_list = []
+        
+        import time, contextlib, io
+        # Define a dummy callback class that discards data.
+        class DummyCallback:
+            def write(self, data):
+                pass
 
-        import time  # Ensure time module is available.
-        # Create a fresh synthesizer for each attempt.
+        # Update create_synthesizer to use DummyCallback.
         def create_synthesizer():
-            return speechsdk.SpeechSynthesizer(
-                speech_config=speech_config,
-                audio_config=speechsdk.audio.AudioOutputConfig(use_default_speaker=True)
-            )
+            dummy_stream = speechsdk.audio.PushAudioOutputStream(DummyCallback())
+            audio_config = speechsdk.audio.AudioOutputConfig(stream=dummy_stream)
+            return speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=audio_config)
         
         for i, chunk in enumerate(ssml_chunks, 1):
             chunk = chunk.strip()
@@ -341,18 +348,19 @@ def synthesize_ssml_to_audio(ssml, output_file, max_retries=3):
             while not success and retry_count < max_retries:
                 try:
                     synthesizer = create_synthesizer()
-                    result = synthesizer.speak_ssml_async(chunk).get()
+                    with contextlib.redirect_stderr(io.StringIO()):
+                        result = synthesizer.speak_ssml_async(chunk).get()
                     if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
                         wav_data_list.append(result.audio_data)
                         success = True
-                        logger.info(f"Chunk {i} synthesized successfully")
+                        logger.info(f"Chunk {i} synthesized successfully (no playback)")
                     else:
                         logger.warning(f"Chunk {i} failed (attempt {retry_count+1})")
                         if result.cancellation_details:
                             logger.error(f"Error: {result.cancellation_details.reason}")
                             logger.error(f"Error details: {result.cancellation_details.error_details}")
                         retry_count += 1
-                        time.sleep(2 ** retry_count)  # Exponential backoff.
+                        time.sleep(2 ** retry_count)
                 except Exception as e:
                     logger.error(f"Chunk {i} exception: {str(e)}")
                     retry_count += 1
